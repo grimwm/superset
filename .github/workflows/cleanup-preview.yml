@@ -35,14 +35,33 @@ jobs:
 
       - name: Update comment
         if: always()
-        uses: thollander/actions-comment-pull-request@v3
+        # thollander/actions-comment-pull-request@v3 runs on Node 20, which
+        # GitHub removed from all runners in Sep 2026, and it has no node24
+        # release. Replaced with the equivalent upsert via github-script.
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
         with:
-          message: |
-            ## 🧹 Preview Cleanup Complete
-
-            The following preview resources have been cleaned up:
-            - ${{ steps.neon-cleanup.outcome == 'success' && '✅' || '⚠️' }} Neon database branch
-            - ${{ steps.electric-cleanup.outcome == 'success' && '✅' || '⚠️' }} Electric Fly.io app
-
-            Thank you for your contribution! 🎉
-          comment-tag: "🚀-preview-deployment"
+          script: |
+            const tag = '🚀-preview-deployment';
+            const marker = `<!-- ${tag} -->`;
+            const dbStatus = '${{ steps.neon-cleanup.outcome }}' === 'success' ? '✅' : '⚠️';
+            const elStatus = '${{ steps.electric-cleanup.outcome }}' === 'success' ? '✅' : '⚠️';
+            const body = [
+              '## 🧹 Preview Cleanup Complete',
+              '',
+              'The following preview resources have been cleaned up:',
+              `- ${dbStatus} Neon database branch`,
+              `- ${elStatus} Electric Fly.io app`,
+              '',
+              'Thank you for your contribution! 🎉',
+              '',
+              marker,
+            ].join('\n');
+            const { owner, repo } = context.repo;
+            const issue_number = context.issue.number;
+            const { data: comments } = await github.rest.issues.listComments({ owner, repo, issue_number });
+            const existing = comments.find((c) => c.body && c.body.includes(tag));
+            if (existing) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body });
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number, body });
+            }
